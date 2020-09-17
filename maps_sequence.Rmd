@@ -1,0 +1,94 @@
+---
+title: "Map of Sequenced COVID-19 Cases by State"
+author: "Andrew Holtz"
+date: "7/29/2020"
+output: html_document
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(sf))
+suppressPackageStartupMessages(library(leaflet))
+suppressPackageStartupMessages(library(rgdal))
+suppressPackageStartupMessages(library(raster))
+suppressPackageStartupMessages(library(tmap))
+suppressPackageStartupMessages(library(RColorBrewer))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(mapview))
+
+```
+
+#
+```{r , echo = FALSE, warning = FALSE, message= FALSE}
+
+#importing from NCBI viral genome database
+
+NCBI <- read.csv("~/covidmaps/NCBI.csv")
+
+NCBI <- dplyr::select(NCBI, Accession, U.S._State, Collection_Date)
+names(NCBI)[2] <- "state_abv"
+NCBI_states <- NCBI %>% group_by(state_abv) %>% 
+  count()
+
+
+
+cases <- read.csv("~/covidmaps/25April2020_perstate.csv")
+
+cases <- left_join(cases, NCBI_states, by = "state_abv")
+names(cases)[1] <- "NAME"
+
+
+
+states <- rgdal::readOGR("C:/Users/Andrew/Downloads/cb_2018_us_state_5m/cb_2018_us_state_5m.shp", layer = "cb_2018_us_state_5m", GDAL1_integer64_policy = TRUE)
+
+
+cases$n <- str_replace_na(cases$n)
+cases$n <- str_replace(cases$n, "NA", as.character(0))
+cases$n <- as.numeric(cases$n)
+
+states <- merge(states, cases, by = 'NAME')
+
+
+bins <- c(0,0.9, 1, 10, 20, 50, 100, 200, 500, 1000, 2000)
+
+labels <- sprintf(
+  "<strong>%s</strong><br/>%g seq. cases </sup>",
+  states$NAME, states$n
+) %>% lapply(htmltools::HTML)
+
+labelFormat = function(
+      prefix = '', suffix = '', between = ' &ndash; ', digits = 3, big.mark = ',',
+      transform = identity)
+
+leaflet(states) %>% 
+  addProviderTiles(providers$OpenStreetMap) %>% 
+  addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.7,
+    fillColor = ~colorBin("YlOrRd", domain = n, bins = bins)(n),
+    highlightOptions = highlightOptions(color = "white", weight = 2,
+      bringToFront = TRUE),
+    label = labels,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", padding = "3px 8px"),
+      textsize = "15px",
+      direction = "auto")
+    ) %>% 
+  setView(lng = -95, lat = 40, zoom = 3.5) %>% 
+  addLegend(pal = colorBin("YlOrRd", domain = n, bins = bins), values = ~density, opacity = 0.7, title = NULL,
+  position = "bottomright")
+
+
+## 'leaflet' objects (image above)
+mapshot(test, url = paste0(getwd(), "/map.html"))
+
+mapshot(test, file = paste0(getwd(), "test.png"))
+
+ 
+
+
+```
+

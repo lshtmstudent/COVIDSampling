@@ -1,0 +1,232 @@
+---
+title: "Script for Adding Columns"
+author: "Andrew Holtz"
+date: "08/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(sf))
+suppressPackageStartupMessages(library(leaflet))
+suppressPackageStartupMessages(library(rgdal))
+suppressPackageStartupMessages(library(raster))
+suppressPackageStartupMessages(library(tmap))
+suppressPackageStartupMessages(library(RColorBrewer))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(lubridate))
+suppressPackageStartupMessages(library(ggridges))
+
+```
+
+#
+```{r message=FALSE, warning=FALSE, , echo=FALSE}
+
+#input metadata table for master tree with 900+ sequences from abroad and the US
+
+metadata_0 <- read.delim("C:/Users/Andrew/Dropbox/masters_project/initial_maps/metadata_0.tab")
+
+#Define US State groupings
+NE <- list("Connecticut", "Maine", "Massachusetts", "New Hampshire", "Rhode Island", "Vermont", "New Jersey","New York", "Pennsylvania")
+
+MW <- list("Illinois", "Indiana", "Michigan", "Ohio", "Wisconsin","Iowa", "Kansas", "Minnesota", "Missouri", "Nebraska", "North Dakota", "South Dakota")
+
+SO <- list("Delaware", "Florida", "Georgia", "Maryland"," North Carolina", "South Carolina", "Virginia", "District of Columbia", "West Virginia", "Alabama", "Kentucky", "Mississippi", "Tennessee", "Arkansas", "Louisiana", "Oklahoma","Texas")
+
+WT <- list("Arizona", "Colorado", "Idaho", "Montana", "Nevada", "New Mexico", "Utah", "Wyoming", "Alaska", "California", "Hawaii", "Oregon","Washington")
+
+rep_gov <- list("Alaska", "Arizona", "Arkansas", "Florida", "Georgia", "Idaho", "Indiana", "Iowa", "Massachusetts", "Maryland", "Mississippi", "Missouri", "Nebraska", "New Hampshire", "North Dakota", "Ohio", "Oklahoma", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "West Virginia", "Wyoming")
+
+#Amend government political group column
+metadata_0$gov <- ifelse(is.element(metadata_0$state, rep_gov) , "Republican","Democrat")
+
+#Amend state grouping column
+metadata_0$group <- ifelse(is.element(metadata_0$state, NE) , "Northeast",
+                           ifelse(is.element(metadata_0$state, MW) , "Midwest",
+                                  ifelse(is.element(metadata_0$state, SO) , "South",
+                                         ifelse(is.element(metadata_0$state, WT) , "West",
+                                          "Abroad"))))
+
+metadata_0 %>% 
+  group_by(group) %>% 
+  count()
+
+length(NE)
+length(MW)
+length(SO)
+length(WT)
+
+#export new metadata table
+write.table(metadata_0, file = "group_metadata_0.tab", sep ="\t", row.names = FALSE)
+
+#using stringr to add county data 
+meta_sep <-str_split_fixed(metadata_0$location, " / ", 4)
+
+meta_sep <- as.data.frame(meta_sep)
+
+#define what is a New York State
+meta_sep$V5 <- ifelse(meta_sep$V3 == "New York" ,as.character(meta_sep$V4), "outside_NY")
+
+meta_sep <- bind_cols(meta_sep, metadata_0, by = NULL)
+
+#Mutate new column with either group name of New York County name
+meta_sep$county <- ifelse(meta_sep$V3 == "New York" ,as.character(meta_sep$V4),
+                          as.character(meta_sep$group))
+
+meta_sep <- as.data.frame(meta_sep)
+
+meta_sep <- dplyr::select(meta_sep, id,country, state, county, gov, group)
+
+write.table(meta_sep, file = "group_metadata_0.tab", sep ="\t", row.names = FALSE)
+
+```
+
+```{r , echo = FALSE, warning = FALSE, message= FALSE}
+
+#fix some data inconsistencies in coding
+meta_sep$county <- str_to_lower(meta_sep$county)
+meta_sep$county <- str_replace(meta_sep$county, "nassau county", "nassau")
+meta_sep$county <- str_replace(meta_sep$county, "suffolk county", "suffolk")
+meta_sep$county <- str_replace(meta_sep$county, "chenango county", "chenango")
+meta_sep$county <- str_trim(meta_sep$county)
+meta_sep$county <- str_to_title(meta_sep$county)
+
+#meta_sep <- meta_sep %>% group_by(county) %>% count() 
+
+```
+
+```{r , echo = FALSE, warning = FALSE, message= FALSE}
+#adding dates and mutation data to the table  
+
+dates <- read.csv("dates.csv")
+dates$date <- as.Date(date_decimal(dates$date, tz = "UTC"))
+
+mutations <- read.delim("mutations.table")
+
+mutation_dates <- left_join(mutations, dates, by = "id")
+
+seq_final <- left_join(mutation_dates, meta_sep, by ="id")
+
+us_dates <- left_join(meta_sep, dates, by = "id")
+
+#creating graphs- graph of dates of sequencing for the US
+
+ggplot(data = seq_final, aes(x = group, y = mutations, fill = group)) + 
+  geom_boxplot(alpha = 0.5) +
+  #theme(panel.background = element_blank()) +
+  theme(legend.position = 'none') +
+  scale_fill_brewer(palette="Accent") +
+        geom_jitter(position=position_jitter(0.1), size = 1, alpha = 0.1) +
+        xlab("State Grouping") +
+        ylab("Nucleotide Distance from Root") + ggtitle("Single Nucleotide Mutations in Sequences from Geographic Groups") +
+  theme(plot.title = element_text(size = 15)) +
+  theme(axis.text = element_text(size=25)) +
+  theme(axis.title = element_text(size=15)) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+  
+ggsave("mutation_group.jpeg", width = 8, height = 6)
+
+
+#mutations by date for each group
+ggplot(data = seq_final, aes(x = date, y = mutations, color = group)) +
+  geom_jitter() +
+  facet_wrap(~ group)+
+  scale_colour_brewer(palette="Accent")+
+  theme(legend.position = 'none') +
+        xlab("Sequence Isolation Date") +
+        ylab("Nucleotide Distance from Root") + ggtitle("Single Nucleotide Mutations in Sequences by Date of Isolation") +
+  theme(plot.title = element_text(size = 15)) +
+  theme(axis.text = element_text(size=20)) +
+  theme(axis.title = element_text(size=15)) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("mutation_date.jpeg", width = 8, height = 6)
+
+#mutations for all groups together with one line of best fit
+ggplot(data = seq_final, aes(x = date, y = mutations, color = group, group = 1)) +
+  geom_jitter() +
+  scale_colour_brewer(palette="Accent")+
+  theme(legend.position = 'none') +
+        xlab("Sequence Isolation Date") +
+        ylab("Nucleotide Distance from Root") + ggtitle("Single Nucleotide Mutations in Sequences by Date of Isolation") +
+  theme(plot.title = element_text(size = 15)) +
+  theme(axis.text = element_text(size=20)) +
+  theme(axis.title = element_text(size=15)) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("mutation_date_total.jpeg", width = 8, height = 6)
+
+'''
+ggplot(data = us_dates, aes(x = date, y = group, fill = group)) +
+  geom_density_ridges(stat = "binline", bins = 20, scale = 0.7, alpha = 0.2) +
+  scale_fill_brewer(palette="Accent") +
+        geom_jitter(size = 0.5, alpha = 1, height = 0.2) +
+        xlab("Date of Isolation") +
+        ylab("Sequence Density")
+  
+ggplot(data = us_dates, aes(x = date, y = group, fill = group)) +
+  geom_density_ridges(scale = 0.8, alpha = 0.3, point_alpha = 1, jittered_points = TRUE, point_size = 0.3) +
+  scale_fill_brewer(palette="Accent") +
+        xlab("Date of Isolation") +
+        ylab("Sequence Density")
+
+n <- 120
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+
+color = grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)]
+
+x_color = c("#D3D3D3","#2BC5D6","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#E02E5C","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#D3D3D3","#475195","#1BA473","#C7D62B","#D3D3D3")
+
+
+ggplot(data = us_dates, aes(x = date, fill = state)) +
+  geom_histogram(binwidth = 5) + facet_wrap(~ group) +
+  #scale_fill_manual(values = c("New York" = "white", "Washington" = "#E08214"))+
+  scale_fill_manual(values = x_color) +
+  theme_bw()+
+        xlab("Date of Isolation") +
+        ylab("Sequence Count")
+'''
+
+#graph of nucleotide differences from the root for mutation calculator
+
+#new column that defines high-count states
+us_dates$States <- ifelse(us_dates$state == "New York" | 
+                           us_dates$state == "abroad" |
+                          us_dates$state == "Wisconsin" |
+                          us_dates$state == "Virginia" |
+                          us_dates$state == "Washington"
+                         ,as.character(us_dates$state),
+                          "Remaining States")
+
+x_color = c("#2BC5D6","#E02E5C", "#475195","#1BA473","#C7D62B","#D3D3D3")
+
+#reorder high-count states
+us_dates$States <- factor(us_dates$States, levels = c("abroad", "Wisconsin", "New York",
+                                                      "Virginia", "Washington", "Remaining States"))
+
+#graph that displays high-count states among each geographic group
+ggplot(data = us_dates, aes(x = date, fill = States)) +
+  geom_histogram(binwidth = 5) + facet_wrap(~ group) +
+  #scale_fill_manual(values = c("New York" = "white", "Washington" = "#E08214"))+
+  scale_fill_manual(values = x_color) +
+  theme_bw()+
+        xlab("Date of Isolation") +
+        ylab("Sequence Count") +
+        ggtitle("Daily Count of Sequences Collected in the United States by Geographic Region") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+ggsave("dailycounts.jpeg", width = 8, height = 6)
+
+
+```
